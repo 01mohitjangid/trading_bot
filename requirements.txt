@@ -1,0 +1,7 @@
+# Core HTTP + config dependencies (Step 1)
+requests>=2.31
+python-dotenv>=1.0
+
+# Added in later steps:
+#   typer[all]   -> CLI layer (Step 3)
+#   pytest       -> unit tests (Step 4)

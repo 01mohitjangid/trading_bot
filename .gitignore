@@ -1,0 +1,20 @@
+# Secrets — never commit real credentials
+.env
+
+# Runtime logs (submitted separately as deliverables)
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
