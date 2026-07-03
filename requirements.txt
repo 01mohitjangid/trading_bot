@@ -2,6 +2,8 @@
 requests>=2.31
 python-dotenv>=1.0
 
+# CLI layer (Step 3)
+typer>=0.12
+
 # Added in later steps:
-#   typer[all]   -> CLI layer (Step 3)
 #   pytest       -> unit tests (Step 4)
