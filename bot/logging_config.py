@@ -1,9 +1,3 @@
-"""Central logging configuration.
-
-Every API request, response, and error is written to both the console and a
-rotating log file, satisfying the task's "log API requests, responses, and
-errors to a log file" requirement while keeping the console readable.
-"""
 from __future__ import annotations
 
 import logging
@@ -21,7 +15,6 @@ def setup_logging(
     level: str = "INFO",
     log_file: str = "trading_bot.log",
 ) -> logging.Logger:
-    """Configure and return the application logger. Safe to call repeatedly."""
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -29,7 +22,6 @@ def setup_logging(
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.propagate = False
 
-    # Idempotent: don't attach duplicate handlers on repeat calls.
     if logger.handlers:
         return logger
 
@@ -41,7 +33,7 @@ def setup_logging(
 
     file_handler = RotatingFileHandler(
         log_dir / log_file,
-        maxBytes=1_000_000,  # ~1 MB per file
+        maxBytes=1_000_000,
         backupCount=5,
         encoding="utf-8",
     )
@@ -52,5 +44,4 @@ def setup_logging(
 
 
 def get_logger() -> logging.Logger:
-    """Return the shared application logger (configure it via setup_logging)."""
     return logging.getLogger(LOGGER_NAME)

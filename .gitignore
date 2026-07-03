@@ -1,9 +1,11 @@
 # Secrets — never commit real credentials
 .env
-
+.sample_logs
 # Runtime logs (submitted separately as deliverables)
 logs/
 *.log
+# ...but keep the curated sample logs that ARE deliverables
+!sample_logs/*.log
 
 # Python
 __pycache__/
@@ -13,6 +15,7 @@ venv/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+
 
 # OS / editor
 .DS_Store

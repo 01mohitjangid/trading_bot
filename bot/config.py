@@ -1,9 +1,3 @@
-"""Configuration loading.
-
-Settings come from environment variables (optionally via a local `.env` file)
-so that secrets never live in source control. `load_settings()` is the single
-entry point; everything downstream receives an immutable `Settings` object.
-"""
 from __future__ import annotations
 
 import os
@@ -14,14 +8,11 @@ from dotenv import load_dotenv
 
 from .exceptions import ConfigError
 
-# Default Binance USDT-M Futures testnet base URL (per the task brief).
 DEFAULT_BASE_URL = "https://testnet.binancefuture.com"
 
 
 @dataclass(frozen=True)
 class Settings:
-    """Immutable application settings."""
-
     api_key: str
     api_secret: str
     base_url: str = DEFAULT_BASE_URL
@@ -32,11 +23,9 @@ class Settings:
 
     @property
     def has_credentials(self) -> bool:
-        """True when both API key and secret are present."""
         return bool(self.api_key and self.api_secret)
 
     def require_credentials(self) -> None:
-        """Raise if credentials are needed but missing (called before signing)."""
         if not self.has_credentials:
             raise ConfigError(
                 "Missing API credentials. Set BINANCE_API_KEY and "
@@ -45,8 +34,6 @@ class Settings:
 
 
 def load_settings(dotenv_path: str | os.PathLike[str] | None = None) -> Settings:
-    """Load settings from the environment (and a `.env` file if present)."""
-    # No-op if the file does not exist; existing env vars take precedence.
     load_dotenv(dotenv_path)
 
     base_url = os.getenv("BINANCE_BASE_URL", DEFAULT_BASE_URL).strip()

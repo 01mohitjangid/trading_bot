@@ -1,11 +1,6 @@
-"""Order domain logic.
-
-`OrderService` is the seam between raw user input and the exchange:
-it validates a request (against live symbol filters), places it, and returns a
-normalized `OrderResult`. The CLI (Step 3) is a thin wrapper over this.
-"""
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -24,11 +19,13 @@ from .validators import (
     validate_time_in_force,
 )
 
+MAX_SETTLE_POLLS = 5
+SETTLE_POLL_SECONDS = 0.2
+_PENDING_STATUSES = ("NEW", "PARTIALLY_FILLED")
+
 
 @dataclass(frozen=True)
 class OrderRequest:
-    """A fully-validated order, ready to serialize for the exchange."""
-
     symbol: str
     side: str
     type: str
@@ -37,7 +34,6 @@ class OrderRequest:
     time_in_force: str = "GTC"
 
     def to_params(self) -> dict[str, str]:
-        """Serialize to the query parameters Binance expects."""
         params = {
             "symbol": self.symbol,
             "side": self.side,
@@ -45,13 +41,11 @@ class OrderRequest:
             "quantity": plain(self.quantity),
         }
         if self.type == "LIMIT":
-            # price is guaranteed non-None for LIMIT by build_request().
-            params["price"] = plain(self.price)  # type: ignore[arg-type]
+            params["price"] = plain(self.price)
             params["timeInForce"] = self.time_in_force
         return params
 
     def summary(self) -> str:
-        """One-line human-readable request summary (for output + logs)."""
         bits = [
             f"symbol={self.symbol}",
             f"side={self.side}",
@@ -59,15 +53,13 @@ class OrderRequest:
             f"quantity={plain(self.quantity)}",
         ]
         if self.type == "LIMIT":
-            bits.append(f"price={plain(self.price)}")  # type: ignore[arg-type]
+            bits.append(f"price={plain(self.price)}")
             bits.append(f"timeInForce={self.time_in_force}")
         return ", ".join(bits)
 
 
 @dataclass(frozen=True)
 class OrderResult:
-    """A normalized view of Binance's order response."""
-
     order_id: int
     symbol: str
     side: str
@@ -98,8 +90,6 @@ class OrderResult:
 
 
 class OrderService:
-    """Validates and places orders on the futures testnet."""
-
     def __init__(
         self,
         client: BinanceFuturesClient,
@@ -119,7 +109,6 @@ class OrderService:
         price: Any | None = None,
         time_in_force: str = "GTC",
     ) -> OrderRequest:
-        """Validate raw inputs and return a ready-to-send OrderRequest."""
         side = validate_side(side)
         order_type = validate_order_type(order_type)
         symbol_norm = str(symbol).strip().upper()
@@ -156,7 +145,6 @@ class OrderService:
         )
 
     def _check_market_notional(self, qty: Decimal, filters: SymbolFilters) -> None:
-        """Best-effort min-notional check for MARKET orders using the last price."""
         if filters.min_notional <= 0:
             return
         try:
@@ -176,12 +164,6 @@ class OrderService:
             ) from None
 
     def place(self, request: OrderRequest) -> OrderResult:
-        """Place an already-validated order and return the settled result.
-
-        Binance's placement response is only an acknowledgement, so we re-query
-        the order to report the true settled state (e.g. a MARKET order's fill
-        price and executed quantity).
-        """
         self._log.info("Placing order: %s", request.summary())
         data = self._client.place_order(request.to_params())
         result = OrderResult.from_response(data)
@@ -196,19 +178,25 @@ class OrderService:
         return result
 
     def _settle(self, result: OrderResult) -> OrderResult:
-        """Re-query the order for its authoritative post-placement state."""
         if not result.order_id:
             return result
-        try:
-            data = self._client.query_order(result.symbol, result.order_id)
-        except TradingBotError as exc:
-            self._log.warning(
-                "Could not re-query order %s: %s — using placement response.",
-                result.order_id,
-                exc,
-            )
-            return result
-        return OrderResult.from_response(data)
+        settled = result
+        for attempt in range(MAX_SETTLE_POLLS):
+            try:
+                data = self._client.query_order(settled.symbol, settled.order_id)
+            except TradingBotError as exc:
+                self._log.warning(
+                    "Could not re-query order %s: %s — using last known state.",
+                    settled.order_id,
+                    exc,
+                )
+                return settled
+            settled = OrderResult.from_response(data)
+            if settled.type != "MARKET" or settled.status not in _PENDING_STATUSES:
+                break
+            if attempt < MAX_SETTLE_POLLS - 1:
+                time.sleep(SETTLE_POLL_SECONDS)
+        return settled
 
     def place_order(
         self,
@@ -219,8 +207,12 @@ class OrderService:
         price: Any | None = None,
         time_in_force: str = "GTC",
     ) -> OrderResult:
-        """Convenience: validate + place in one call."""
         request = self.build_request(
-            symbol, side, order_type, quantity, price, time_in_force
+            symbol,
+            side,
+            order_type,
+            quantity,
+            price=price,
+            time_in_force=time_in_force,
         )
         return self.place(request)

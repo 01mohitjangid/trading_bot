@@ -5,5 +5,5 @@ python-dotenv>=1.0
 # CLI layer (Step 3)
 typer>=0.12
 
-# Added in later steps:
-#   pytest       -> unit tests (Step 4)
+# Tests (Step 4)
+pytest>=8.0
