@@ -1,24 +1,14 @@
-"""Command-line interface for the trading bot.
-
-A thin presentation layer over `OrderService`: it parses/validates CLI input,
-prints a clear request summary and response, and reports success or failure.
-All business logic lives in the domain layer (orders/validators/exchange).
-
-Examples:
-    python -m bot.cli order -s BTCUSDT --side BUY  -t MARKET -q 0.002
-    python -m bot.cli order -s BTCUSDT --side BUY  -t LIMIT  -q 0.002 -p 55000
-    python -m bot.cli order -s BTCUSDT --side SELL -t LIMIT  -q 0.002 -p 70000 --dry-run
-    python -m bot.cli balance
-"""
 from __future__ import annotations
 
 import typer
 
 from .client import BinanceFuturesClient
-from .config import Settings, load_settings
+from .config import load_settings
 from .exceptions import TradingBotError, ValidationError
-from .logging_config import get_logger, setup_logging
+from .exchange import ExchangeInfo
+from .logging_config import setup_logging
 from .orders import OrderRequest, OrderResult, OrderService
+from .twap import TwapExecutor, TwapPlan, TwapResult
 from .validators import plain
 
 app = typer.Typer(
@@ -34,27 +24,20 @@ CYAN = typer.colors.CYAN
 _RULE = "─" * 46
 
 
-# --------------------------------------------------------------------------- #
-# Setup helpers
-# --------------------------------------------------------------------------- #
-def _bootstrap() -> tuple[Settings, BinanceFuturesClient, OrderService]:
-    """Load settings, configure logging, and wire up the service."""
+def _bootstrap() -> tuple[BinanceFuturesClient, ExchangeInfo, OrderService]:
     settings = load_settings()
     logger = setup_logging(settings.log_dir, settings.log_level)
     client = BinanceFuturesClient(settings, logger)
-    service = OrderService(client, logger=logger)
-    return settings, client, service
+    exchange = ExchangeInfo(client)
+    service = OrderService(client, exchange, logger=logger)
+    return client, exchange, service
 
 
 def _fail(message: str) -> "typer.Exit":
-    """Print a red failure line and return an Exit(1) to raise."""
     typer.secho(f"\n✗ FAILURE — {message}", fg=RED, bold=True, err=True)
     return typer.Exit(code=1)
 
 
-# --------------------------------------------------------------------------- #
-# Output formatting
-# --------------------------------------------------------------------------- #
 def _print_request(request: OrderRequest) -> None:
     typer.secho(f"\n{_RULE}", fg=CYAN)
     typer.secho("  ORDER REQUEST", fg=CYAN, bold=True)
@@ -70,7 +53,6 @@ def _print_request(request: OrderRequest) -> None:
 
 
 def _num_or_dash(value: str) -> str:
-    """Render a numeric string, collapsing empty/zero values to an em dash."""
     try:
         return value if value and float(value) != 0 else "—"
     except ValueError:
@@ -95,9 +77,6 @@ def _print_response(result: OrderResult) -> None:
     typer.secho(_RULE, fg=CYAN)
 
 
-# --------------------------------------------------------------------------- #
-# Commands
-# --------------------------------------------------------------------------- #
 @app.command()
 def order(
     symbol: str = typer.Option(..., "--symbol", "-s", help="Trading pair, e.g. BTCUSDT"),
@@ -112,10 +91,11 @@ def order(
         False, "--dry-run", help="Validate and show the request without placing it."
     ),
 ) -> None:
-    """Place a MARKET or LIMIT order (BUY/SELL) on the futures testnet."""
-    _settings, client, service = _bootstrap()
     try:
-        # 1) Validate input against live exchange filters.
+        client, _exchange, service = _bootstrap()
+    except TradingBotError as exc:
+        raise _fail(str(exc))
+    try:
         try:
             request = service.build_request(symbol, side, order_type, quantity, price, tif)
         except ValidationError as exc:
@@ -125,13 +105,11 @@ def order(
 
         _print_request(request)
 
-        # 2) Dry run stops here — nothing is sent to the exchange.
         if dry_run:
             typer.secho("\n• Dry run — order NOT placed.", fg=YELLOW, bold=True)
             typer.echo(f"  Would send params: {request.to_params()}")
             return
 
-        # 3) Place the order.
         typer.echo("\nPlacing order…")
         try:
             result = service.place(request)
@@ -150,8 +128,10 @@ def order(
 
 @app.command()
 def balance() -> None:
-    """Show your futures USDT balance (a quick signed-request check)."""
-    _settings, client, _service = _bootstrap()
+    try:
+        client, _exchange, _service = _bootstrap()
+    except TradingBotError as exc:
+        raise _fail(str(exc))
     try:
         try:
             usdt = client.get_usdt_balance()
@@ -169,10 +149,87 @@ def balance() -> None:
         client.close()
 
 
+def _print_twap_plan(plan: TwapPlan) -> None:
+    typer.secho(f"\n{_RULE}", fg=CYAN)
+    typer.secho("  TWAP PLAN", fg=CYAN, bold=True)
+    typer.secho(_RULE, fg=CYAN)
+    typer.echo(f"  Symbol         : {plan.symbol}")
+    typer.echo(f"  Side           : {plan.side}")
+    typer.echo(f"  Total Quantity : {plain(plan.total_quantity)}")
+    typer.echo(f"  Slices         : {plan.slices}")
+    typer.echo(f"  Interval       : {plan.interval_seconds:g}s")
+    typer.echo(f"  Slice sizes    : {', '.join(plain(q) for q in plan.slice_quantities)}")
+    typer.secho(_RULE, fg=CYAN)
+
+
+def _print_twap_result(result: TwapResult) -> None:
+    avg = result.avg_price
+    typer.secho(f"\n{_RULE}", fg=CYAN)
+    typer.secho("  TWAP RESULT", fg=CYAN, bold=True)
+    typer.secho(_RULE, fg=CYAN)
+    typer.echo(f"  Slices filled  : {len(result.orders)}/{result.plan.slices}")
+    typer.echo(f"  Total Executed : {plain(result.total_executed)}")
+    typer.echo(f"  Total Quote    : {plain(result.total_quote)}")
+    typer.echo(f"  Avg Price      : {plain(avg) if avg is not None else '—'}")
+    typer.echo(f"  Order IDs      : {', '.join(str(o.order_id) for o in result.orders)}")
+    typer.secho(_RULE, fg=CYAN)
+
+
+@app.command()
+def twap(
+    symbol: str = typer.Option(..., "--symbol", "-s", help="Trading pair, e.g. BTCUSDT"),
+    side: str = typer.Option(..., "--side", help="BUY or SELL"),
+    quantity: str = typer.Option(..., "--quantity", "-q", help="TOTAL quantity to work"),
+    slices: int = typer.Option(3, "--slices", "-n", help="Number of MARKET slices"),
+    interval: float = typer.Option(
+        1.0, "--interval", "-i", help="Seconds to wait between slices"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show the slice schedule without placing anything."
+    ),
+) -> None:
+    try:
+        client, exchange, service = _bootstrap()
+    except TradingBotError as exc:
+        raise _fail(str(exc))
+    try:
+        executor = TwapExecutor(client, service, exchange)
+        try:
+            plan = executor.plan(symbol, side, quantity, slices, interval)
+        except ValidationError as exc:
+            raise _fail(f"invalid input: {exc}")
+        except TradingBotError as exc:
+            raise _fail(str(exc))
+
+        _print_twap_plan(plan)
+
+        if dry_run:
+            typer.secho("\n• Dry run — no slices placed.", fg=YELLOW, bold=True)
+            return
+
+        typer.echo(f"\nExecuting TWAP ({plan.slices} slices)…")
+        try:
+            result = executor.execute(plan)
+        except TradingBotError as exc:
+            raise _fail(str(exc))
+
+        _print_twap_result(result)
+        typer.secho(
+            f"\n✓ SUCCESS — TWAP done: {plain(result.total_executed)} filled "
+            f"across {len(result.orders)} slices.",
+            fg=GREEN,
+            bold=True,
+        )
+    finally:
+        client.close()
+
+
 def main() -> None:
-    # Ensure logging is configured even if a command errors during bootstrap.
-    get_logger()
-    app()
+    try:
+        app()
+    except TradingBotError as exc:
+        typer.secho(f"\n✗ FAILURE — {exc}", fg=RED, bold=True, err=True)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

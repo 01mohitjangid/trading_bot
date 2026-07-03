@@ -1,12 +1,3 @@
-"""Connectivity smoke test for the Binance Futures testnet.
-
-Run this after configuring your `.env` to confirm the Step 1 foundation works:
-
-    python -m bot.healthcheck
-
-Public checks (ping, server time) work without credentials. The balance check
-runs only when API keys are configured.
-"""
 from __future__ import annotations
 
 import sys

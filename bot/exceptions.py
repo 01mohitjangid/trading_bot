@@ -1,37 +1,23 @@
-"""Custom exception hierarchy for the trading bot.
-
-A single base class (`TradingBotError`) lets callers catch every domain error
-with one `except`, while the subclasses let them distinguish *why* something
-failed (bad config, bad input, network, or a Binance-side rejection).
-"""
 from __future__ import annotations
 
 
 class TradingBotError(Exception):
-    """Base class for all trading-bot errors."""
+    pass
 
 
 class ConfigError(TradingBotError):
-    """Configuration is missing or invalid (e.g. absent API credentials)."""
+    pass
 
 
 class ValidationError(TradingBotError):
-    """User input failed validation (used from Step 2 onward)."""
+    pass
 
 
 class BinanceRequestError(TradingBotError):
-    """A network-level failure (timeout, DNS, connection reset)."""
+    pass
 
 
 class BinanceAPIError(TradingBotError):
-    """Binance returned an error response.
-
-    Attributes:
-        code: Binance business error code (e.g. -2019 "Margin is insufficient").
-        message: Human-readable message returned by Binance.
-        status_code: The HTTP status code of the response.
-    """
-
     def __init__(
         self,
         code: int | None,

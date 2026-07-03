@@ -1,9 +1,3 @@
-"""Exchange-info parsing and caching.
-
-Binance returns a symbol's trading rules as a list of loosely-typed "filters".
-This module turns that into a typed, cached `SymbolFilters` object so the
-validators can work with real numbers instead of dict digging.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,27 +10,21 @@ from .exceptions import ValidationError
 
 @dataclass(frozen=True)
 class SymbolFilters:
-    """The trading rules we care about for a single symbol."""
-
     symbol: str
     status: str
     base_asset: str
     quote_asset: str
     price_precision: int
     quantity_precision: int
-    # PRICE_FILTER
     tick_size: Decimal
     min_price: Decimal
     max_price: Decimal
-    # LOT_SIZE (LIMIT orders)
     step_size: Decimal
     min_qty: Decimal
     max_qty: Decimal
-    # MARKET_LOT_SIZE (MARKET orders)
     market_step_size: Decimal
     market_min_qty: Decimal
     market_max_qty: Decimal
-    # MIN_NOTIONAL
     min_notional: Decimal
 
     @property
@@ -56,7 +44,6 @@ def _dec(mapping: dict[str, Any], key: str, default: str = "0") -> Decimal:
 
 
 def parse_symbol_filters(entry: dict[str, Any]) -> SymbolFilters:
-    """Build a `SymbolFilters` from one entry of exchangeInfo["symbols"]."""
     filters = entry.get("filters", [])
     price_f = _find_filter(filters, "PRICE_FILTER")
     lot_f = _find_filter(filters, "LOT_SIZE")
@@ -76,7 +63,6 @@ def parse_symbol_filters(entry: dict[str, Any]) -> SymbolFilters:
         step_size=_dec(lot_f, "stepSize"),
         min_qty=_dec(lot_f, "minQty"),
         max_qty=_dec(lot_f, "maxQty"),
-        # Fall back to LOT_SIZE if MARKET_LOT_SIZE is absent.
         market_step_size=_dec(market_lot_f, "stepSize", str(_dec(lot_f, "stepSize"))),
         market_min_qty=_dec(market_lot_f, "minQty", str(_dec(lot_f, "minQty"))),
         market_max_qty=_dec(market_lot_f, "maxQty", str(_dec(lot_f, "maxQty"))),
@@ -85,8 +71,6 @@ def parse_symbol_filters(entry: dict[str, Any]) -> SymbolFilters:
 
 
 class ExchangeInfo:
-    """Fetches exchange info once, caches it, and resolves per-symbol filters."""
-
     def __init__(self, client: BinanceFuturesClient) -> None:
         self._client = client
         self._symbols: dict[str, SymbolFilters] | None = None
@@ -101,7 +85,7 @@ class ExchangeInfo:
 
     def filters_for(self, symbol: str) -> SymbolFilters:
         self.load()
-        assert self._symbols is not None  # populated by load()
+        assert self._symbols is not None
         try:
             return self._symbols[symbol]
         except KeyError:

@@ -1,0 +1,10 @@
+2026-07-03 16:26:36 | INFO     | trading_bot | --> GET /fapi/v1/exchangeInfo params={} signed=False
+2026-07-03 16:26:36 | INFO     | trading_bot | <-- GET /fapi/v1/exchangeInfo HTTP 200 OK
+2026-07-03 16:26:36 | INFO     | trading_bot | --> GET /fapi/v1/ticker/price params={'symbol': 'BTCUSDT'} signed=False
+2026-07-03 16:26:37 | INFO     | trading_bot | <-- GET /fapi/v1/ticker/price HTTP 200 OK
+2026-07-03 16:26:37 | INFO     | trading_bot | Placing order: symbol=BTCUSDT, side=BUY, type=MARKET, quantity=0.002
+2026-07-03 16:26:37 | INFO     | trading_bot | --> POST /fapi/v1/order params={'symbol': 'BTCUSDT', 'side': 'BUY', 'type': 'MARKET', 'quantity': '0.002', 'timestamp': 1783076197089, 'recvWindow': 5000} signed=True
+2026-07-03 16:26:37 | INFO     | trading_bot | <-- POST /fapi/v1/order HTTP 200 OK
+2026-07-03 16:26:37 | INFO     | trading_bot | --> GET /fapi/v1/order params={'symbol': 'BTCUSDT', 'orderId': 18700546706, 'timestamp': 1783076197304, 'recvWindow': 5000} signed=True
+2026-07-03 16:26:37 | INFO     | trading_bot | <-- GET /fapi/v1/order HTTP 200 OK
+2026-07-03 16:26:37 | INFO     | trading_bot | Order settled: id=18700546706 status=FILLED executedQty=0.0020 avgPrice=61946.600000

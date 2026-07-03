@@ -1,9 +1,3 @@
-"""Input validation for order parameters.
-
-Every numeric check uses `Decimal` so tick-size / step-size multiples are exact
-(binary floats would make e.g. `0.3 % 0.1 != 0`). Each validator either returns
-a normalized value or raises `ValidationError` with an actionable message.
-"""
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
@@ -18,7 +12,6 @@ VALID_TIME_IN_FORCE = ("GTC", "IOC", "FOK", "GTX")
 
 
 def plain(value: Decimal) -> str:
-    """Format a Decimal without scientific notation (Binance wants plain strings)."""
     return format(value, "f")
 
 
@@ -75,7 +68,6 @@ def validate_quantity(
     *,
     is_market: bool,
 ) -> Decimal:
-    """Validate quantity against the (market or limit) lot-size filter."""
     qty = _to_decimal(quantity, "Quantity")
     if qty <= 0:
         raise ValidationError("Quantity must be greater than zero.")
@@ -97,7 +89,6 @@ def validate_quantity(
 
 
 def validate_price(price: Any, filters: SymbolFilters) -> Decimal:
-    """Validate a limit price against the price filter."""
     value = _to_decimal(price, "Price")
     if value <= 0:
         raise ValidationError("Price must be greater than zero.")
@@ -118,7 +109,6 @@ def validate_notional(
     price: Decimal,
     filters: SymbolFilters,
 ) -> None:
-    """Ensure quantity x price meets the symbol's minimum notional."""
     if filters.min_notional <= 0:
         return
     notional = quantity * price

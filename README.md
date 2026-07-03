@@ -2,36 +2,46 @@
 
 A small, well-structured Python trading bot that places orders on the
 [Binance Futures Testnet](https://testnet.binancefuture.com) (USDT-M), with a
-clean client/CLI separation, structured logging, and robust error handling.
+clean client/CLI separation, structured logging, robust validation, and error
+handling.
 
-Built incrementally in **4 steps**:
+## Features
 
-| Step | Status | Scope |
-|------|--------|-------|
-| **1. Foundation & Infrastructure** | ✅ Done | Config/secrets, logging, exceptions, signed REST client, connectivity check |
-| **2. Validation & Order Domain** | ✅ Done | Exchange filters, input validators, MARKET/LIMIT order service |
-| **3. CLI & UX** | ✅ Done | Typer CLI, request/response output, `--dry-run`, end-to-end orders |
-| **4. Bonus, Tests & Deliverables** | ⬜ Planned | Bonus order type, unit tests, full docs, sample logs |
+**Core**
+- Place **MARKET** and **LIMIT** orders, **BUY** and **SELL**
+- Validated CLI input (symbol, side, type, quantity, price)
+- Clear output: order request summary, response (`orderId`, `status`,
+  `executedQty`, `avgPrice`), and a success/failure line
+- Separated layers: REST **client** ↔ order/validation **domain** ↔ **CLI**
+- All API requests, responses, and errors logged to a rotating file
+- Exception handling for invalid input, API errors, and network failures
 
----
+**Bonus**
+- **TWAP** (Time-Weighted Average Price) — splits a large order into timed
+  MARKET slices and reports the volume-weighted average fill
+- **Enhanced CLI UX** — colored output, a `--dry-run` mode, and a `balance`
+  command
+- Unit tests (30, fully mocked — no network needed)
 
-## Project structure (so far)
+## Project structure
 
 ```
 Trading/
 ├── bot/
 │   ├── __init__.py
-│   ├── config.py          # Settings & secret loading            (Step 1)
-│   ├── logging_config.py  # Console + rotating-file logging       (Step 1)
-│   ├── exceptions.py      # Custom exception hierarchy            (Step 1)
-│   ├── client.py          # Signed Binance REST client wrapper    (Step 1-2)
-│   ├── healthcheck.py     # Connectivity smoke test               (Step 1)
-│   ├── exchange.py        # Exchange-info parsing & symbol filters (Step 2)
-│   ├── validators.py      # Decimal-based input validation        (Step 2)
-│   ├── orders.py          # Order request/result + OrderService   (Step 2)
-│   └── cli.py             # Typer CLI entry point                 (Step 3)
+│   ├── config.py          # Settings & secret loading
+│   ├── logging_config.py  # Console + rotating-file logging
+│   ├── exceptions.py      # Custom exception hierarchy
+│   ├── client.py          # Signed Binance REST client wrapper
+│   ├── exchange.py        # Exchange-info parsing & symbol filters
+│   ├── validators.py      # Decimal-based input validation
+│   ├── orders.py          # OrderRequest/OrderResult + OrderService
+│   ├── twap.py            # TWAP strategy (bonus)
+│   ├── healthcheck.py     # Connectivity smoke test
+│   └── cli.py             # Typer CLI entry point
+├── tests/                 # pytest unit tests (mocked)
+├── sample_logs/           # Deliverable logs: market / limit / twap
 ├── .env.example
-├── .gitignore
 ├── requirements.txt
 └── README.md
 ```
@@ -53,71 +63,82 @@ Trading/
 
 3. **Configure credentials**
 
-   Register at <https://testnet.binancefuture.com>, generate an API key/secret,
-   then:
+   Register at <https://testnet.binancefuture.com>, open **API Management**,
+   choose **System generated** (HMAC), and generate a key/secret. Then:
 
    ```bash
    cp .env.example .env
-   # edit .env and paste your BINANCE_API_KEY / BINANCE_API_SECRET
+   # edit .env and paste BINANCE_API_KEY / BINANCE_API_SECRET
    ```
 
-## Verify the foundation (Step 1)
+## Verify connectivity
 
 ```bash
 python -m bot.healthcheck
 ```
+Prints ping, server time, and (with keys configured) your USDT balance.
 
-Expected output (with credentials configured):
+## Usage
 
-```
-✓ Ping OK
-✓ Server time: 1751558400000
-✓ USDT balance: 15000.00000000 (available: 15000.00000000)
-
-Step 1 foundation is working. ✅
-```
-
-Without credentials it still verifies connectivity (ping + server time) and
-skips the balance check. All requests, responses, and errors are logged to
-`logs/trading_bot.log`.
-
-## Placing orders (Step 3 CLI)
-
-The CLI lives in `bot/cli.py`. See all options with `python -m bot.cli order --help`.
+See every option with `python -m bot.cli order --help`. Short flags:
+`-s` symbol · `-t` type · `-q` quantity · `-p` price.
 
 ```bash
-# MARKET buy (fills immediately)
+# MARKET buy (fills immediately; the bot re-queries so output shows the fill)
 python -m bot.cli order --symbol BTCUSDT --side BUY  --type MARKET --quantity 0.002
 
 # LIMIT sell (rests until the price is reached)
 python -m bot.cli order --symbol BTCUSDT --side SELL --type LIMIT --quantity 0.002 --price 70000
 
-# Validate only — shows the exact params without sending anything (no keys needed)
+# Validate only — shows the exact params without sending (no keys needed)
 python -m bot.cli order -s BTCUSDT --side BUY -t LIMIT -q 0.002 -p 55000 --dry-run
+
+# TWAP (bonus): split 0.006 into 3 MARKET slices, 1s apart
+python -m bot.cli twap --symbol BTCUSDT --side BUY --quantity 0.006 --slices 3 --interval 1
 
 # Quick signed-request check
 python -m bot.cli balance
 ```
 
-Short flags: `-s` symbol, `-t` type, `-q` quantity, `-p` price.
+Each order prints a request summary, the response details, and a green
+**SUCCESS** / red **FAILURE** line. Invalid input, API errors, and network
+failures are reported as a single clean failure message (exit code 1), never a
+stack trace.
 
-Every run prints an **order request summary**, the **order response**
-(`orderId`, `status`, `executedQty`, `avgPrice`, …), and a green **SUCCESS** or
-red **FAILURE** line. For MARKET orders the bot re-queries the order so the
-output reflects the actual fill rather than the initial acknowledgement.
+## Tests
 
-## Design notes / assumptions
+```bash
+python -m pytest -q
+```
+All tests are fully mocked (no network / no keys), covering validators, order
+building/serialization, market-order settlement, TWAP slicing + aggregation,
+and the request signing.
+
+## Logging
+
+Everything is logged to `logs/trading_bot.log` (rotating, ~1 MB × 5) and echoed
+to the console. Curated example logs for the deliverable live in
+[`sample_logs/`](sample_logs/): `market_order.log`, `limit_order.log`, and
+`twap_order.log`. The API secret and request signature are never written to the
+logs.
+
+## Design notes & assumptions
 
 - **Direct REST over `requests`** (not `python-binance`) for full control of
   signing, logging, and error translation.
 - **Secrets via environment** (`.env`, gitignored) — never committed.
-- **Requests are signed** with HMAC-SHA256; secrets are never logged and the
-  signature is masked in logs.
-- **One exception hierarchy** (`TradingBotError` and subclasses) so callers can
-  distinguish config vs. validation vs. network vs. Binance-side failures.
+- **Signing is done over the exact query string sent** — the string is built
+  once, HMAC-SHA256 signed, and appended as `&signature=…`, so there is no
+  client/library re-encoding mismatch.
 - **`Decimal` everywhere for money/size math** — tick-size and step-size
   multiples are checked exactly, avoiding binary-float rounding bugs.
-- **Live symbol filters** (`exchange.py`) are fetched once and cached; validators
-  enforce tick size, step size, min/max qty, and min notional before any order
-  leaves the process. `OrderService` (`orders.py`) is the reusable seam the CLI
-  will sit on top of in Step 3.
+- **Live symbol filters** are fetched once and cached; validators enforce tick
+  size, step size, min/max quantity, and min notional before any order is sent.
+- **MARKET orders are re-queried** after placement (bounded retries) so the
+  reported fill reflects the settled state, not the initial acknowledgement.
+- **Assumes one-way position mode** (the account default), so orders do not send
+  `positionSide`; a hedge-mode account would require it.
+- **Bonus choice — TWAP (not Stop-Limit):** the Futures **testnet** rejects
+  conditional orders (STOP / STOP_MARKET) on the order endpoint with
+  `-4120 "Order type not supported for this endpoint"`. TWAP is built on plain
+  MARKET orders, so it actually executes on the testnet.
