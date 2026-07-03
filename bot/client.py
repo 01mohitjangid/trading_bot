@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import logging
 import time
+from decimal import Decimal
 from typing import Any, Mapping
 from urllib.parse import urlencode
 
@@ -26,6 +27,9 @@ from .logging_config import get_logger
 PING_PATH = "/fapi/v1/ping"
 TIME_PATH = "/fapi/v1/time"
 BALANCE_PATH = "/fapi/v2/balance"
+EXCHANGE_INFO_PATH = "/fapi/v1/exchangeInfo"
+TICKER_PRICE_PATH = "/fapi/v1/ticker/price"
+ORDER_PATH = "/fapi/v1/order"
 
 
 def _redact(value: str, keep: int = 4) -> str:
@@ -144,11 +148,30 @@ class BinanceFuturesClient:
         data = self._request("GET", TIME_PATH)
         return int(data["serverTime"])
 
+    def exchange_info(self) -> dict[str, Any]:
+        """Return trading rules and symbol filters for all symbols."""
+        return self._request("GET", EXCHANGE_INFO_PATH)
+
+    def ticker_price(self, symbol: str) -> Decimal:
+        """Return the latest traded price for a symbol."""
+        data = self._request("GET", TICKER_PRICE_PATH, {"symbol": symbol})
+        return Decimal(str(data["price"]))
+
     # -- signed endpoints ----------------------------------------------------
 
     def get_balances(self) -> list[dict[str, Any]]:
         """Return all futures account asset balances (signed)."""
         return self._request("GET", BALANCE_PATH, signed=True)
+
+    def place_order(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        """Submit a new order (signed POST /fapi/v1/order)."""
+        return self._request("POST", ORDER_PATH, params, signed=True)
+
+    def query_order(self, symbol: str, order_id: int) -> dict[str, Any]:
+        """Fetch the current state of an order (signed GET /fapi/v1/order)."""
+        return self._request(
+            "GET", ORDER_PATH, {"symbol": symbol, "orderId": order_id}, signed=True
+        )
 
     def get_usdt_balance(self) -> dict[str, Any] | None:
         """Return the USDT balance entry, or None if absent."""
